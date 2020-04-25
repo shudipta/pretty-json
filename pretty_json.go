@@ -37,7 +37,7 @@ func stringify(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-func indent(iskey bool, ind int, v reflect.Value) {
+func indent(iskey bool, ind int, v Interface) {
 	if iskey {
 		for i := 0; i < ind; i++ {
 			fmt.Print(indentationStr)
@@ -112,25 +112,23 @@ func rec(v reflect.Value, iskey bool, ind int) {
 
 	case reflect.Struct:
 		indent(false, ind, reflect.ValueOf("{"))
-		t := v.Type()
 		hasElem := false
 
 		for i := 0; i < v.NumField(); i++ {
-			ft := t.Field(i)
+			ft := v.Type().Field(i)
 			fv := v.Field(i)
 
 			omitempty := false
-			tagName, hasJSONTag := ft.Tag.Lookup("json")
+			nameTag, hasJSONTag := ft.Tag.Lookup("json")
 			if hasJSONTag {
-				//tagName = strings.TrimSpace(tagName)
-				for i, tag := range strings.Split(strings.TrimSpace(tagName), ",") {
-					if i == 0 {
-						tagName = tag
+				for j, tag := range strings.Split(strings.TrimSpace(nameTag), ",") {
+					if j == 0 {
+						nameTag = tag
 					} else if tag == "omitempty" {
 						omitempty = true
 					}
 				}
-				if tagName == "-" {
+				if nameTag == "-" {
 					continue
 				}
 			}
@@ -167,13 +165,13 @@ func rec(v reflect.Value, iskey bool, ind int) {
 			if fv.IsZero() && omitempty {
 				continue
 			}
-			if tagName == "" {
-				tagName = ft.Name
+			if nameTag == "" {
+				nameTag = ft.Name
 			}
 
 			hasElem = true
 			fmt.Println()
-			indent(true, ind+1, reflect.ValueOf(tagName))
+			indent(true, ind+1, stringify(nameTag))
 			fmt.Print(": ")
 			//fmt.Print(reflect.DeepEqual(fv.Interface(), reflect.Zero(fv.Type()).Interface()))
 			rec(fv, false, ind+1)
