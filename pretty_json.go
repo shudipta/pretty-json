@@ -37,14 +37,19 @@ func stringify(s string) string {
 	return fmt.Sprintf("%q", s)
 }
 
-func indent(iskey bool, ind int, v Interface) {
+func indent(iskey bool, ind int, v reflect.Value) {
 	if iskey {
 		fmt.Println()
 		for i := 0; i < ind; i++ {
 			fmt.Print(indentationStr)
 		}
 	}
-	fmt.Print(v)
+	
+	if v.Kind() == reflect.String {
+		fmt.Print(stringify(v.String()))
+	} else {
+		fmt.Print(v)
+	}
 }
 
 func zeroValue(kind reflect.Kind) bool {
