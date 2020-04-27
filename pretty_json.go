@@ -1,4 +1,4 @@
-package main
+package json
 
 import (
 	"fmt"
@@ -39,6 +39,7 @@ func stringify(s string) string {
 
 func indent(iskey bool, ind int, v Interface) {
 	if iskey {
+		fmt.Println()
 		for i := 0; i < ind; i++ {
 			fmt.Print(indentationStr)
 		}
@@ -46,14 +47,91 @@ func indent(iskey bool, ind int, v Interface) {
 	fmt.Print(v)
 }
 
-func rec(v reflect.Value, iskey bool, ind int) {
-	if v.IsZero() {
-		switch v.Kind() {
-		case reflect.Interface, reflect.Ptr, reflect.Map,
-			reflect.Chan, reflect.Func, reflect.UnsafePointer:
-			indent(false, ind, reflect.ValueOf("null"))
-			return
+func zeroValue(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.Interface, reflect.Ptr, reflect.Map,
+		reflect.Chan, reflect.Func, reflect.UnsafePointer:
+		indent(false, 0, reflect.ValueOf("null"))
+		return true
+	}
+
+	return false
+}
+
+func processJSONTag(ft reflect.StructField) (nameTag string, omitempty bool) {
+	tags, hasJSONTag := ft.Tag.Lookup("json")
+	if hasJSONTag {
+		for j, tag := range strings.Split(strings.TrimSpace(tags), ",") {
+			if j == 0 {
+				nameTag = tag
+			} else if tag == "omitempty" {
+				omitempty = true
+			}
 		}
+		if nameTag == "-" {
+			return "", omitempty
+		}
+	}
+	if nameTag == "" {
+		nameTag = ft.Name
+	}
+
+	return nameTag, omitempty
+}
+
+func processDefaultTag(ft reflect.StructField, fv reflect.Value) reflect.Value {
+	if fv.IsZero() {
+		if fv.IsValid() && fv.CanSet() {
+			//if fv.IsValid() && fv.CanSet() {
+			if d, hasDefaultTag := ft.Tag.Lookup("default"); hasDefaultTag && d != "" {
+				if fv.Kind() == reflect.String {
+					fv.SetString(d)
+				} else if fv.Kind() == reflect.Bool {
+					fv = reflect.ValueOf(mustBe(strconv.ParseBool(d)))
+				} else if fv.Kind() == reflect.Int ||
+					fv.Kind() == reflect.Int8 ||
+					fv.Kind() == reflect.Int16 ||
+					fv.Kind() == reflect.Int32 ||
+					fv.Kind() == reflect.Int64 {
+					fv = reflect.ValueOf(mustBe(strconv.ParseInt(d, 0, 64)))
+				} else if fv.Kind() == reflect.Uint ||
+					fv.Kind() == reflect.Uint8 ||
+					fv.Kind() == reflect.Uint16 ||
+					fv.Kind() == reflect.Uint32 ||
+					fv.Kind() == reflect.Uint64 {
+					fv = reflect.ValueOf(mustBe(strconv.ParseUint(d, 0, 64)))
+				} else if fv.Kind() == reflect.Float32 ||
+					fv.Kind() == reflect.Float64 {
+					fv = reflect.ValueOf(mustBe(strconv.ParseFloat(d, 64)))
+				} else if d == "null" {
+					fv.Set(reflect.New(ft.Type).Elem())
+				}
+			}
+		}
+	}
+
+	return fv
+}
+
+func processStructTags(
+	ft reflect.StructField, fv reflect.Value,
+) (string, reflect.Value) {
+	nameTag, omitempty := processJSONTag(ft)
+	if nameTag == "" {
+		return "", reflect.Value{}
+	}
+
+	fv = processDefaultTag(ft, fv)
+	if fv.IsZero() && omitempty {
+		return "", reflect.Value{}
+	}
+
+	return nameTag, fv
+}
+
+func rec(v reflect.Value, iskey bool, ind int) {
+	if v.IsZero() && zeroValue(v.Kind()) {
+		return
 	}
 
 	switch v.Kind() {
@@ -75,23 +153,14 @@ func rec(v reflect.Value, iskey bool, ind int) {
 		iter := v.MapRange()
 		cond := iter.Next()
 		for cond {
-			fmt.Println()
-
-			key := iter.Key()
-			rec(key, true, ind+1)
-
+			rec(iter.Key(), true, ind+1)
 			fmt.Print(": ")
-
-			val := iter.Value()
-			rec(val, false, ind+1)
+			rec(iter.Value(), false, ind+1)
 
 			cond = iter.Next()
 			if cond {
 				fmt.Print(",")
 			}
-		}
-		if hasElem {
-			fmt.Println()
 		}
 		indent(hasElem, ind, reflect.ValueOf("}"))
 
@@ -99,14 +168,10 @@ func rec(v reflect.Value, iskey bool, ind int) {
 		indent(false, ind, reflect.ValueOf("["))
 		hasElem := v.Len() > 0
 		for i := 0; i < v.Len(); i++ {
-			fmt.Println()
 			rec(v.Index(i), true, ind+1)
 			if i < v.Len()-1 {
 				fmt.Print(",")
 			}
-		}
-		if hasElem {
-			fmt.Println()
 		}
 		indent(hasElem, ind, reflect.ValueOf("]"))
 
@@ -115,62 +180,12 @@ func rec(v reflect.Value, iskey bool, ind int) {
 		hasElem := false
 
 		for i := 0; i < v.NumField(); i++ {
-			ft := v.Type().Field(i)
-			fv := v.Field(i)
-
-			omitempty := false
-			nameTag, hasJSONTag := ft.Tag.Lookup("json")
-			if hasJSONTag {
-				for j, tag := range strings.Split(strings.TrimSpace(nameTag), ",") {
-					if j == 0 {
-						nameTag = tag
-					} else if tag == "omitempty" {
-						omitempty = true
-					}
-				}
-				if nameTag == "-" {
-					continue
-				}
-			}
-
-			if fv.IsZero() {
-				if fv.IsValid() && fv.CanSet() {
-					//if fv.IsValid() && fv.CanSet() {
-					if d, hasDefaultTag := ft.Tag.Lookup("default"); hasDefaultTag && d != "" {
-						if fv.Kind() == reflect.String {
-							fv.SetString(d)
-						} else if fv.Kind() == reflect.Bool {
-							fv = reflect.ValueOf(mustBe(strconv.ParseBool(d)))
-						} else if fv.Kind() == reflect.Int ||
-							fv.Kind() == reflect.Int8 ||
-							fv.Kind() == reflect.Int16 ||
-							fv.Kind() == reflect.Int32 ||
-							fv.Kind() == reflect.Int64 {
-							fv = reflect.ValueOf(mustBe(strconv.ParseInt(d, 0, 64)))
-						} else if fv.Kind() == reflect.Uint ||
-							fv.Kind() == reflect.Uint8 ||
-							fv.Kind() == reflect.Uint16 ||
-							fv.Kind() == reflect.Uint32 ||
-							fv.Kind() == reflect.Uint64 {
-							fv = reflect.ValueOf(mustBe(strconv.ParseUint(d, 0, 64)))
-						} else if fv.Kind() == reflect.Float32 ||
-							fv.Kind() == reflect.Float64 {
-							fv = reflect.ValueOf(mustBe(strconv.ParseFloat(d, 64)))
-						} else if d == "null" {
-							fv.Set(reflect.New(ft.Type).Elem())
-						}
-					}
-				}
-			}
-			if fv.IsZero() && omitempty {
-				continue
-			}
+			nameTag, fv := processStructTags(v.Type().Field(i), v.Field(i))
 			if nameTag == "" {
-				nameTag = ft.Name
+				continue
 			}
 
 			hasElem = true
-			fmt.Println()
 			indent(true, ind+1, stringify(nameTag))
 			fmt.Print(": ")
 			//fmt.Print(reflect.DeepEqual(fv.Interface(), reflect.Zero(fv.Type()).Interface()))
@@ -179,9 +194,6 @@ func rec(v reflect.Value, iskey bool, ind int) {
 			if i < v.NumField()-1 {
 				fmt.Print(",")
 			}
-		}
-		if hasElem {
-			fmt.Println()
 		}
 		indent(hasElem, ind, reflect.ValueOf("}"))
 
@@ -197,6 +209,7 @@ func PrettyPrint(obj Interface, args ...interface{}) {
 	if len(args) > 1 {
 		fmt.Println("[Warning] Currently only one optional argument is supported and it is the indentation string")
 	}
+
 	if len(args) == 1 {
 		if indStr, ok := args[0].(string); ok {
 			indentationStr = indStr
