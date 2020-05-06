@@ -44,8 +44,15 @@ func indent(v Interface, ind int, nl bool) {
 	for i := 0; nl && i < ind; i++ {
 		fmt.Print(indentationStr)
 	}
+
 	if vStr, ok := v.(string); ok {
 		v = stringify(vStr)
+	} else if v1, ok := v.(reflect.Value); ok {
+		if v1.Kind() == reflect.String {
+			v = stringify(v1.String())
+		}
+	} else if v == nil {
+		v = "null"
 	}
 	fmt.Print(v)
 }
@@ -54,7 +61,7 @@ func zeroValue(kind reflect.Kind) bool {
 	switch kind {
 	case reflect.Interface, reflect.Ptr, reflect.Map,
 		reflect.Chan, reflect.Func, reflect.UnsafePointer:
-		indent("null", 0, false)
+		indent(nil, 0, false)
 		return true
 	}
 
